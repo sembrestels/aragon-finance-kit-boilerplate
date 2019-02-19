@@ -19,6 +19,8 @@ import "@aragon/os/contracts/apm/APMNamehash.sol";
 import "@aragon/apps-voting/contracts/Voting.sol";
 import "@aragon/apps-token-manager/contracts/TokenManager.sol";
 import "@aragon/apps-shared-minime/contracts/MiniMeToken.sol";
+import "@aragon/apps-vault/contracts/Vault.sol";
+import "@aragon/apps-finance/contracts/Finance.sol";
 
 import "./CounterApp.sol";
 
@@ -55,7 +57,7 @@ contract Kit is KitBase {
     uint64 constant PCT = 10 ** 16;
     address constant ANY_ENTITY = address(-1);
 
-    function Kit(ENS ens) KitBase(DAOFactory(0), ens) {
+    constructor(ENS ens) KitBase(DAOFactory(0), ens) public {
         tokenFactory = new MiniMeTokenFactory();
     }
 
@@ -65,24 +67,36 @@ contract Kit is KitBase {
         acl.createPermission(this, dao, dao.APP_MANAGER_ROLE(), this);
 
         address root = msg.sender;
-        bytes32 appId = apmNamehash("app");
-        bytes32 votingAppId = apmNamehash("voting");
-        bytes32 tokenManagerAppId = apmNamehash("token-manager");
 
+        bytes32 appId = apmNamehash("app");
         CounterApp app = CounterApp(dao.newAppInstance(appId, latestVersionAppBase(appId)));
-        Voting voting = Voting(dao.newAppInstance(votingAppId, latestVersionAppBase(votingAppId)));
-        TokenManager tokenManager = TokenManager(dao.newAppInstance(tokenManagerAppId, latestVersionAppBase(tokenManagerAppId)));
+        appId = apmNamehash("voting");
+        Voting voting = Voting(dao.newAppInstance(appId, latestVersionAppBase(appId)));
+        appId = apmNamehash("token-manager");
+        TokenManager tokenManager = TokenManager(dao.newAppInstance(appId, latestVersionAppBase(appId)));
+        appId = apmNamehash("vault");
+        Vault vault = Vault(dao.newAppInstance(appId, latestVersionAppBase(appId), new bytes(0), true));
+        appId = apmNamehash("finance");
+        Finance finance = Finance(dao.newAppInstance(appId, latestVersionAppBase(appId)));
 
         MiniMeToken token = tokenFactory.createCloneToken(MiniMeToken(0), 0, "App token", 0, "APP", true);
         token.changeController(tokenManager);
 
-        app.initialize();
-        tokenManager.initialize(token, true, 0);
         // Initialize apps
+        app.initialize();
+        vault.initialize();
+        finance.initialize(vault, 30 days);
+        tokenManager.initialize(token, true, 0);
         voting.initialize(token, 50 * PCT, 20 * PCT, 1 days);
 
         acl.createPermission(this, tokenManager, tokenManager.MINT_ROLE(), this);
         tokenManager.mint(root, 1); // Give one token to root
+
+
+        acl.createPermission(finance, vault, vault.TRANSFER_ROLE(), voting);
+        acl.createPermission(voting, finance, finance.CREATE_PAYMENTS_ROLE(), voting);
+        acl.createPermission(voting, finance, finance.EXECUTE_PAYMENTS_ROLE(), voting);
+        acl.createPermission(voting, finance, finance.MANAGE_PAYMENTS_ROLE(), voting);
 
         acl.createPermission(ANY_ENTITY, voting, voting.CREATE_VOTES_ROLE(), root);
 
